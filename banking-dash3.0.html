@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Banking Dash: The Game</title>
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --accent-primary: #facc15;
+            --accent-secondary: #4ade80;
+            --danger: #ef4444;
+            --text-light: #f8fafc;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #1e293b;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            color: var(--text-light);
+            overflow: hidden;
+        }
+
+        #game-header {
+            text-align: center;
+            margin-bottom: 10px;
+            max-width: 800px;
+            width: 100%;
+        }
+
+        #question-display {
+            background: var(--bg-dark);
+            padding: 15px 25px;
+            border-radius: 12px;
+            border: 2px solid var(--accent-primary);
+            font-size: 1.1rem;
+            font-weight: bold;
+            margin-bottom: 10px;
+            min-height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            line-height: 1.4;
+        }
+
+        #canvas-container {
+            position: relative;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            overflow: hidden;
+            background: #0f172a;
+        }
+
+        canvas {
+            display: block;
+            background: #111827;
+        }
+
+        #ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .screen {
+            pointer-events: auto;
+            background: rgba(15, 23, 42, 0.95);
+            padding: 40px;
+            border-radius: 16px;
+            text-align: center;
+            border: 3px solid var(--accent-primary);
+            max-width: 500px;
+        }
+
+        button {
+            background: var(--accent-primary);
+            color: var(--bg-dark);
+            border: none;
+            padding: 12px 24px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: transform 0.1s;
+            margin-top: 20px;
+        }
+
+        button:active { transform: scale(0.95); }
+
+        .stats {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            display: flex;
+            gap: 20px;
+            font-weight: bold;
+            color: var(--accent-secondary);
+            text-shadow: 1px 1px 2px black;
+        }
+
+        .controls-hint {
+            margin-top: 10px;
+            color: #94a3b8;
+            font-size: 0.9rem;
+        }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+<div id="game-header">
+    <h1>BANKING DASH</h1>
+    <div id="question-display">Press Start to Begin!</div>
+</div>
+
+<div id="canvas-container">
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="ui-overlay">
+        <!-- Start Screen -->
+        <div id="start-screen" class="screen">
+            <h2>Welcome to Banking Dash</h2>
+            <p>Answer questions by moving to the correct vault.<br>Avoid the red "Debt Traps"!</p>
+            <p style="color: var(--accent-secondary); margin-top: 10px;">Warning: Correct answers increase trap size and quantity!</p>
+            <p class="controls-hint">Use Arrow Keys or WASD to move.</p>
+            <button onclick="startGame()">START MISSION</button>
+        </div>
+
+        <!-- Game Over Screen -->
+        <div id="game-over-screen" class="screen hidden">
+            <h2 id="over-title">Game Over!</h2>
+            <p id="final-score">Score: 0</p>
+            <button onclick="startGame()">TRY AGAIN</button>
+        </div>
+    </div>
+
+    <div class="stats">
+        <span>SCORE: <span id="score-val">0</span></span>
+        <span>LIVES: <span id="lives-val">3</span></span>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const questionEl = document.getElementById('question-display');
+    const scoreVal = document.getElementById('score-val');
+    const livesVal = document.getElementById('lives-val');
+    
+    // Config
+    const CANVAS_WIDTH = 800;
+    const CANVAS_HEIGHT = 500;
+    canvas.width = CANVAS_WIDTH;
+    canvas.height = CANVAS_HEIGHT;
+
+    let score = 0;
+    let lives = 3;
+    let gameActive = false;
+    let currentQuestion = null;
+    let enemies = [];
+    let vaults = [];
+    
+    // Difficulty tracking
+    let enemyCount = 3;
+    let enemyBaseSize = 15;
+
+    const player = {
+        x: CANVAS_WIDTH / 2,
+        y: CANVAS_HEIGHT / 2,
+        size: 20,
+        speed: 5
+    };
+
+    const bankQuestions = [
+        { q: "What is a bank?", a: "A financial institution that manages money", choices: ["A place to buy stocks", "A financial institution that manages money", "A type of store", "A government office"] },
+        { q: "What is money put into a bank called?", a: "A deposit", choices: ["A withdrawal", "A transaction", "A deposit", "A fee"] },
+        { q: "What is money taken out of a bank account called?", a: "A withdrawal", choices: ["A balance", "A withdrawal", "Interest", "A loan"] },
+        { q: "What does your bank balance show?", a: "How much money you have in your account", choices: ["How much money you owe", "How much money you have in your account", "Your credit score", "Your monthly fee"] },
+        { q: "Why do banks exist?", a: "To safely hold and manage money", choices: ["To sell products", "To safely hold and manage money", "To give away free money", "To control spending"] },
+        { q: "Which of the following is a type of bank?", a: "Credit union", choices: ["Grocery store", "Credit union", "Library", "Mall"] },
+        { q: "What is a bank branch?", a: "A physical bank location", choices: ["An online banking app", "A physical bank location", "An ATM", "A savings account"] },
+        { q: "What does ATM stand for?", a: "Automated Teller Machine", choices: ["Automated Teller Machine", "Account Transfer Method", "Authorized Transaction Machine", "Automated Transfer Manager"] },
+        { q: "Who owns a credit union?", a: "Its members", choices: ["The government", "Shareholders", "Its members", "Online companies"] },
+        { q: "What is an online bank?", a: "A bank that operates mostly online", choices: ["A bank with no accounts", "A bank that operates mostly online", "A type of credit card", "A government bank"] },
+        { q: "Who is the account holder?", a: "The person who owns the account", choices: ["The bank manager", "The person who owns the account", "The government", "The employer"] },
+        { q: "What is direct deposit?", a: "Money sent directly into a bank account", choices: ["Paying with cash", "A fee charged by banks", "Money sent directly into a bank account", "Taking money out of an ATM"] },
+        { q: "What is a paycheque?", a: "Money earned from working", choices: ["A bank statement", "Money earned from working", "A loan", "A savings account"] },
+        { q: "What type of account is used for daily spending?", a: "Chequing account", choices: ["Savings account", "Investment account", "Chequing account", "Credit account"] },
+        { q: "What card is linked to a chequing account?", a: "Debit card", choices: ["Credit card", "Gift card", "Debit card", "Store card"] },
+        { q: "What happens when you use a debit card?", a: "Money leaves your account immediately", choices: ["You borrow money", "You earn interest", "Money leaves your account immediately", "Nothing happens"] },
+        { q: "What is a transaction?", a: "A change in your account balance", choices: ["A bank loan", "A change in your account balance", "A monthly fee", "A savings goal"] },
+        { q: "What type of account is meant for saving money?", a: "Savings account", choices: ["Chequing account", "Debit account", "Savings account", "Credit account"] },
+        { q: "Why do people use savings accounts?", a: "To store money for later", choices: ["To spend money quickly", "To hide money", "To store money for later", "To borrow money"] },
+        { q: "What is interest (earned)?", a: "Money the bank pays you for saving", choices: ["Money the bank pays you for saving", "A monthly fee", "A penalty", "Borrowed money"] },
+        { q: "What does a debit card use?", a: "Your own money", choices: ["Borrowed money", "Store credit", "Your own money", "Government money"] },
+        { q: "What does a credit card allow you to do?", a: "Borrow money", choices: ["Spend your savings", "Borrow money", "Avoid paying", "Earn free money"] },
+        { q: "What is a credit limit?", a: "The maximum you can borrow", choices: ["The minimum payment", "The total money you earn", "The maximum you can borrow", "The interest rate"] },
+        { q: "Why must credit cards be paid back?", a: "All of the above", choices: ["Because banks require it", "Because it is borrowed money", "Because it earns interest", "All of the above"] },
+        { q: "What does it mean to borrow money?", a: "To receive money you must repay", choices: ["To spend your savings", "To receive money you must repay", "To earn interest", "To avoid fees"] },
+        { q: "Why do banks charge interest on loans?", a: "To make money from lending", choices: ["To punish borrowers", "To make money from lending", "To encourage saving", "To stop spending"] },
+        { q: "What is a monthly fee?", a: "A fee charged each month", choices: ["A one-time charge", "A fee charged each month", "A type of interest", "A loan payment"] },
+        { q: "What is a transaction limit?", a: "A limit on account use", choices: ["A spending reward", "A savings goal", "A limit on account use", "A credit score"] },
+        { q: "What is overdraft?", a: "Spending more than you have", choices: ["Saving extra money", "Spending more than you have", "Earning interest", "Paying bills"] },
+        { q: "What does NSF stand for?", a: "Non-Sufficient Funds", choices: ["New Savings Fund", "Non-Sufficient Funds", "National Savings Fee", "No Spending Function"] },
+        { q: "What can happen if you overdraft?", a: "You may be charged a fee", choices: ["You earn interest", "You receive a reward", "You may be charged a fee", "Nothing happens"] },
+        { q: "Why are teen bank accounts helpful?", a: "They often have fewer fees", choices: ["They always earn high interest", "They often have fewer fees", "They allow unlimited spending", "They don’t need supervision"] },
+        { q: "What habit helps avoid fees?", a: "Checking your balance regularly", choices: ["Ignoring your balance", "Checking your balance regularly", "Spending quickly", "Using credit only"] },
+        { q: "What does it mean to maximize a teen account?", a: "Use it wisely and avoid fees", choices: ["Spend all your money", "Avoid learning", "Use it wisely and avoid fees", "Borrow more money"] },
+        { q: "Who is responsible for protecting bank accounts?", a: "Both the bank and the user", choices: ["Only the bank", "Only the user", "Both the bank and the user", "The government"] },
+        { q: "Why do banks use security systems?", a: "To protect accounts", choices: ["To slow down spending", "To protect accounts", "To charge fees", "To control users"] },
+        { q: "What can cause financial problems?", a: "Not understanding how banks work", choices: ["Understanding banks", "Checking balances", "Not understanding how banks work", "Saving money"] },
+        { q: "Why is separating savings from spending helpful?", a: "It protects saved money", choices: ["It earns more fees", "It makes spending easier", "It protects saved money", "It increases overdraft"] },
+        { q: "What does it mean to manage money?", a: "Track and use it responsibly", choices: ["Hide it", "Track and use it responsibly", "Spend it quickly", "Ignore it"] },
+        { q: "What is the main benefit of understanding banking basics?", a: "Making informed financial decisions", choices: ["Getting rich quickly", "Avoiding taxes", "Making informed financial decisions", "Never spending money"] }
+    ];
+
+    const keys = {};
+    window.addEventListener('keydown', e => keys[e.code] = true);
+    window.addEventListener('keyup', e => keys[e.code] = false);
+
+    function createEnemy(size = enemyBaseSize) {
+        // Find position far from player to avoid instant death on spawn
+        let x, y;
+        do {
+            x = Math.random() * CANVAS_WIDTH;
+            y = Math.random() * CANVAS_HEIGHT;
+        } while (Math.hypot(x - player.x, y - player.y) < 200);
+
+        return {
+            x: x,
+            y: y,
+            size: size,
+            dx: (Math.random() - 0.5) * 6,
+            dy: (Math.random() - 0.5) * 6
+        };
+    }
+
+    function initLevel(isNewQuestion = true) {
+        player.x = CANVAS_WIDTH / 2;
+        player.y = CANVAS_HEIGHT / 2;
+        
+        if (isNewQuestion) {
+            currentQuestion = bankQuestions[Math.floor(Math.random() * bankQuestions.length)];
+            questionEl.innerText = currentQuestion.q;
+        }
+
+        vaults = [];
+        const positions = [
+            { x: 50, y: 50 },
+            { x: CANVAS_WIDTH - 150, y: 50 },
+            { x: 50, y: CANVAS_HEIGHT - 100 },
+            { x: CANVAS_WIDTH - 150, y: CANVAS_HEIGHT - 100 }
+        ];
+
+        const shuffledChoices = [...currentQuestion.choices].sort(() => Math.random() - 0.5);
+        
+        positions.forEach((pos, i) => {
+            vaults.push({
+                x: pos.x,
+                y: pos.y,
+                w: 120, // Slightly wider for longer answers
+                h: 60,
+                text: shuffledChoices[i],
+                isCorrect: shuffledChoices[i] === currentQuestion.a
+            });
+        });
+
+        // Regenerate current enemies at current difficulty
+        enemies = [];
+        for(let i = 0; i < enemyCount; i++) {
+            enemies.push(createEnemy(enemyBaseSize));
+        }
+    }
+
+    function startGame() {
+        score = 0;
+        lives = 3;
+        enemyCount = 3;
+        enemyBaseSize = 15;
+        gameActive = true;
+        scoreVal.innerText = score;
+        livesVal.innerText = lives;
+        document.getElementById('start-screen').classList.add('hidden');
+        document.getElementById('game-over-screen').classList.add('hidden');
+        initLevel();
+        requestAnimationFrame(gameLoop);
+    }
+
+    function handleLifeLoss() {
+        lives--;
+        livesVal.innerText = lives;
+        // Reset difficulty metrics on death
+        enemyCount = 3;
+        enemyBaseSize = 15;
+        
+        if (lives <= 0) {
+            gameOver();
+        } else {
+            initLevel(false); 
+        }
+    }
+
+    function gameOver() {
+        gameActive = false;
+        document.getElementById('game-over-screen').classList.remove('hidden');
+        document.getElementById('final-score').innerText = "Final Score: " + score;
+    }
+
+    function update() {
+        if (!gameActive) return;
+
+        if (keys['ArrowUp'] || keys['KeyW']) player.y -= player.speed;
+        if (keys['ArrowDown'] || keys['KeyS']) player.y += player.speed;
+        if (keys['ArrowLeft'] || keys['KeyA']) player.x -= player.speed;
+        if (keys['ArrowRight'] || keys['KeyD']) player.x += player.speed;
+
+        player.x = Math.max(0, Math.min(CANVAS_WIDTH - player.size, player.x));
+        player.y = Math.max(0, Math.min(CANVAS_HEIGHT - player.size, player.y));
+
+        enemies.forEach(en => {
+            en.x += en.dx;
+            en.y += en.dy;
+
+            if (en.x - en.size <= 0 || en.x + en.size >= CANVAS_WIDTH) en.dx *= -1;
+            if (en.y - en.size <= 0 || en.y + en.size >= CANVAS_HEIGHT) en.dy *= -1;
+
+            const dist = Math.hypot((player.x + player.size/2) - en.x, (player.y + player.size/2) - en.y);
+            if (dist < (player.size/2) + en.size) {
+                handleLifeLoss();
+            }
+        });
+
+        vaults.forEach(v => {
+            if (player.x < v.x + v.w && player.x + player.size > v.x &&
+                player.y < v.y + v.h && player.y + player.size > v.y) {
+                if (v.isCorrect) {
+                    const basePoints = 100;
+                    // Score increases based on number of enemies and their size
+                    const pointsGained = Math.round(basePoints * (enemyCount * 0.5) * (enemyBaseSize / 15));
+                    score += pointsGained;
+                    scoreVal.innerText = score;
+
+                    // Increase difficulty
+                    enemyCount++;
+                    enemyBaseSize += 2;
+                    
+                    initLevel();
+                } else {
+                    handleLifeLoss();
+                }
+            }
+        });
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+        // Draw Vaults
+        vaults.forEach(v => {
+            ctx.fillStyle = '#1e293b';
+            ctx.strokeStyle = varToHex('--accent-secondary');
+            ctx.lineWidth = 2;
+            ctx.fillRect(v.x, v.y, v.w, v.h);
+            ctx.strokeRect(v.x, v.y, v.w, v.h);
+            
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 12px Arial';
+            ctx.textAlign = 'center';
+            wrapText(ctx, v.text, v.x + v.w/2, v.y + 20, v.w - 10, 14);
+        });
+
+        // Draw Enemies
+        enemies.forEach(en => {
+            ctx.fillStyle = '#ef4444';
+            ctx.beginPath();
+            ctx.arc(en.x, en.y, en.size, 0, Math.PI * 2);
+            ctx.fill();
+            
+            const pulse = 5 + Math.sin(Date.now() / 200) * 5;
+            ctx.shadowBlur = pulse;
+            ctx.shadowColor = '#ef4444';
+        });
+        ctx.shadowBlur = 0;
+
+        // Draw Player
+        ctx.fillStyle = varToHex('--accent-primary');
+        ctx.beginPath();
+        ctx.roundRect(player.x, player.y, player.size, player.size, 4);
+        ctx.fill();
+        ctx.fillStyle = 'black';
+        ctx.font = 'bold 12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('$', player.x + 10, player.y + 15);
+    }
+
+    // Helper to wrap text in small vault boxes
+    function wrapText(context, text, x, y, maxWidth, lineHeight) {
+        const words = text.split(' ');
+        let line = '';
+        let testY = y;
+
+        for (let n = 0; n < words.length; n++) {
+            let testLine = line + words[n] + ' ';
+            let metrics = context.measureText(testLine);
+            let testWidth = metrics.width;
+            if (testWidth > maxWidth && n > 0) {
+                context.fillText(line, x, testY);
+                line = words[n] + ' ';
+                testY += lineHeight;
+            } else {
+                line = testLine;
+            }
+        }
+        context.fillText(line, x, testY);
+    }
+
+    function varToHex(varName) {
+        return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+    }
+
+    function gameLoop() {
+        update();
+        draw();
+        if (gameActive) requestAnimationFrame(gameLoop);
+    }
+</script>
+</body>
+</html>
